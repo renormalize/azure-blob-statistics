@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Azure/azure-storage-blob-go/azblob"
@@ -43,16 +44,18 @@ func (connection containerConnection) getSnapshots() ([]string, []string, error)
 	return fullSnapshots, deltaSnapshots, nil
 }
 
-func (connection containerConnection) getSnapshotProperties(blobName string) (snapshotProperties, error) {
+func (connection containerConnection) getSnapshotProperties(wg *sync.WaitGroup, blobName string, properties []snapshotProperties, i int) {
+	defer wg.Done()
 	blobURL := connection.containerURL.NewBlobURL(blobName)
 	resp, err := blobURL.GetProperties(context.Background(), azblob.BlobAccessConditions{}, azblob.ClientProvidedKeyOptions{})
+	// do not count snapshot if request errors
 	if err != nil {
-		return snapshotProperties{}, fmt.Errorf("failed to fetch properties of the blob, error: %v", err)
+		return
 	}
-	return snapshotProperties{
+	properties[i] = snapshotProperties{
 		blobName,
 		resp.ContentLength(),
-	}, nil
+	}
 }
 
 func createContainerConnection(accountName, accountKey, containerName string) (containerConnection, error) {

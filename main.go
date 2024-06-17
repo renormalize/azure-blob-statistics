@@ -3,6 +3,8 @@ package main
 import (
 	"fmt"
 	"os"
+	"sync"
+	"time"
 )
 
 func containerInfo() (string, string, string, error) {
@@ -28,6 +30,8 @@ func main() {
 	fmt.Println("Container statistics!")
 	fmt.Println()
 
+	start := time.Now()
+
 	accountName, accountKey, containerName, err := containerInfo()
 	if err != nil {
 		fmt.Println("Starting the program failed because:", err)
@@ -46,30 +50,36 @@ func main() {
 		return
 	}
 
-	var deltaProperties []snapshotProperties
+	var wg sync.WaitGroup
+
+	deltaProperties := make([]snapshotProperties, len(deltaSnapshots))
 	var totalDeltaSize, maxDeltaSize int64
 
-	for _, delta := range deltaSnapshots {
-		property, err := connection.getSnapshotProperties(delta)
-		if err != nil {
-			fmt.Printf("Errored while getting the snapshots properties for blob %s, error: %v", delta, err)
-		}
-		deltaProperties = append(deltaProperties, property)
-		totalDeltaSize += property.size
-		maxDeltaSize = max(maxDeltaSize, property.size)
+	for i, delta := range deltaSnapshots {
+		wg.Add(1)
+		go connection.getSnapshotProperties(&wg, delta, deltaProperties, i)
+	}
+	// delta calls done
+	wg.Wait()
 
+	for _, delta := range deltaProperties {
+		totalDeltaSize += delta.size
+		maxDeltaSize = max(maxDeltaSize, delta.size)
 	}
 
-	var fullProperties []snapshotProperties
+	fullProperties := make([]snapshotProperties, len(fullSnapshots))
 	var totalFullSize, maxFullSize int64
-	for _, full := range fullSnapshots {
-		property, err := connection.getSnapshotProperties(full)
-		if err != nil {
-			fmt.Printf("Errored while getting the snapshots properties for blob %s, error: %v", full, err)
-		}
-		fullProperties = append(fullProperties, property)
-		totalFullSize += property.size
-		maxFullSize = max(maxFullSize, property.size)
+
+	for i, full := range fullSnapshots {
+		wg.Add(1)
+		go connection.getSnapshotProperties(&wg, full, fullProperties, i)
+	}
+	// full calls done
+	wg.Wait()
+
+	for _, full := range fullProperties {
+		totalFullSize += full.size
+		maxFullSize = max(maxFullSize, full.size)
 	}
 
 	fmt.Println("Number of full snapshots are:", len(fullSnapshots))
@@ -78,9 +88,10 @@ func main() {
 	fmt.Println("Total size of fulls is:", totalFullSize)
 	fmt.Println("Max size of deltas is:", maxDeltaSize)
 	fmt.Println("Max size of fulls is:", maxFullSize)
-
 	fmt.Println()
 
+	fmt.Println("Ran in:", time.Since(start).Seconds())
+	fmt.Println()
 }
 
 func max(a, b int64) int64 {
