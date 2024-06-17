@@ -10,12 +10,17 @@ import (
 	"github.com/Azure/azure-storage-blob-go/azblob"
 )
 
-type azConnection struct {
+type containerConnection struct {
 	containerURL *azblob.ContainerURL
 }
 
+type snapshotProperties struct {
+	name string
+	size int64
+}
+
 // returns the full snapshots and delta snapshots
-func (connection azConnection) listBlobs() ([]string, []string, error) {
+func (connection containerConnection) getSnapshots() ([]string, []string, error) {
 	var fullSnapshots, deltaSnapshots []string
 	opts := azblob.ListBlobsSegmentOptions{}
 	for marker := (azblob.Marker{}); marker.NotDone(); {
@@ -38,11 +43,23 @@ func (connection azConnection) listBlobs() ([]string, []string, error) {
 	return fullSnapshots, deltaSnapshots, nil
 }
 
-func createAzConnection(accountName, accountKey, containerName string) (azConnection, error) {
+func (connection containerConnection) getSnapshotProperties(blobName string) (snapshotProperties, error) {
+	blobURL := connection.containerURL.NewBlobURL(blobName)
+	resp, err := blobURL.GetProperties(context.Background(), azblob.BlobAccessConditions{}, azblob.ClientProvidedKeyOptions{})
+	if err != nil {
+		return snapshotProperties{}, fmt.Errorf("failed to fetch properties of the blob, error: %v", err)
+	}
+	return snapshotProperties{
+		blobName,
+		resp.ContentLength(),
+	}, nil
+}
+
+func createContainerConnection(accountName, accountKey, containerName string) (containerConnection, error) {
 	credentials, err := azblob.NewSharedKeyCredential(accountName, accountKey)
 	if err != nil {
 		fmt.Println()
-		return azConnection{}, fmt.Errorf("unable to create a credential object due to: %w", err)
+		return containerConnection{}, fmt.Errorf("unable to create a credential object due to: %w", err)
 
 	}
 
@@ -54,13 +71,13 @@ func createAzConnection(accountName, accountKey, containerName string) (azConnec
 
 	blobURL, err := url.Parse(fmt.Sprintf("https://%s.%s", credentials.AccountName(), "blob.core.windows.net"))
 	if err != nil {
-		return azConnection{}, fmt.Errorf("unable to construct the blob url due to: %w", err)
+		return containerConnection{}, fmt.Errorf("unable to construct the blob url due to: %w", err)
 	}
 
 	serviceURL := azblob.NewServiceURL(*blobURL, pipeline)
 	containerURL := serviceURL.NewContainerURL(containerName)
 
-	return azConnection{
+	return containerConnection{
 		containerURL: &containerURL,
 	}, nil
 }
