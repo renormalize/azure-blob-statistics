@@ -2,11 +2,13 @@ module github.com/renormalize/azure-blob-statistics
 
 go 1.22.3
 
-require github.com/Azure/azure-storage-blob-go v0.15.0
+require (
+	github.com/Azure/azure-storage-blob-go v0.15.0
+	github.com/dustin/go-humanize v1.0.1
+)
 
 require (
 	github.com/Azure/azure-pipeline-go v0.2.3 // indirect
-	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/google/uuid v1.2.0 // indirect
 	github.com/mattn/go-ieproxy v0.0.1 // indirect
 	golang.org/x/net v0.0.0-20210610132358-84b48f89b13b // indirect

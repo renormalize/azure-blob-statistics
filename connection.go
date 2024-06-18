@@ -21,40 +21,42 @@ type snapshotProperties struct {
 }
 
 // returns the full snapshots and delta snapshots
-func (connection containerConnection) getSnapshots() ([]string, []string, error) {
-	var fullSnapshots, deltaSnapshots []string
+func (connection containerConnection) getSnapshots(ctx context.Context, fullSnapshotCh, deltaSnapshotCh chan string, errorCh chan error) {
 	opts := azblob.ListBlobsSegmentOptions{}
 	for marker := (azblob.Marker{}); marker.NotDone(); {
 		// Get a result segment starting with the blob indicated by the current Marker.
-		listBlob, err := connection.containerURL.ListBlobsFlatSegment(context.TODO(), marker, opts)
+		listBlob, err := connection.containerURL.ListBlobsFlatSegment(ctx, marker, opts)
 		if err != nil {
-			return nil, nil, fmt.Errorf("failed to list the blobs, error: %v", err)
+			errorCh <- fmt.Errorf("failed to list the blobs, error: %v", err)
+			return
 		}
 		marker = listBlob.NextMarker
 
 		// Process the blobs returned in this result segment
 		for _, blob := range listBlob.Segment.BlobItems {
 			if strings.Contains(blob.Name, "v2/Full") {
-				fullSnapshots = append(fullSnapshots, blob.Name)
+				fullSnapshotCh <- blob.Name
 			} else if strings.Contains(blob.Name, "v2/Incr") {
-				deltaSnapshots = append(deltaSnapshots, blob.Name)
+				deltaSnapshotCh <- blob.Name
 			}
 		}
 	}
-	return fullSnapshots, deltaSnapshots, nil
+	errorCh <- nil
 }
 
-func (connection containerConnection) getSnapshotProperties(wg *sync.WaitGroup, blobName string, properties []snapshotProperties, i int) {
+func (connection containerConnection) getSnapshotProperties(ctx context.Context, wg *sync.WaitGroup, blobNameCh chan string, propertyCh chan snapshotProperties) {
 	defer wg.Done()
-	blobURL := connection.containerURL.NewBlobURL(blobName)
-	resp, err := blobURL.GetProperties(context.Background(), azblob.BlobAccessConditions{}, azblob.ClientProvidedKeyOptions{})
-	// do not count snapshot if request errors
-	if err != nil {
-		return
-	}
-	properties[i] = snapshotProperties{
-		blobName,
-		resp.ContentLength(),
+	for blobName := range blobNameCh {
+		blobURL := connection.containerURL.NewBlobURL(blobName)
+		resp, err := blobURL.GetProperties(ctx, azblob.BlobAccessConditions{}, azblob.ClientProvidedKeyOptions{})
+		// do not count snapshot if request errors
+		if err != nil {
+			continue
+		}
+		propertyCh <- snapshotProperties{
+			blobName,
+			resp.ContentLength(),
+		}
 	}
 }
 

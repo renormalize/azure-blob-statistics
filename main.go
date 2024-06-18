@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"sync"
@@ -35,6 +36,60 @@ func containerInfo() (string, string, string, error) {
 	return accountName, accountKey, containerName, nil
 }
 
+func generateStatistics(ctx context.Context, connection containerConnection) (numberFull, numberDelta, totalFullSize, totalDeltaSize, maxFullSize, maxDeltaSize int64) {
+	// create all consumers for the full and the delta snapshots
+	fullSnapshotCh := make(chan string)
+	deltaSnapshotCh := make(chan string)
+
+	fullSnapshotPropertyCh := make(chan snapshotProperties)
+	deltaSnapshotPropertyCh := make(chan snapshotProperties)
+
+	errCh := make(chan error)
+	go connection.getSnapshots(ctx, fullSnapshotCh, deltaSnapshotCh, errCh)
+
+	var wgFull, wgDelta sync.WaitGroup
+
+	for range 1000 {
+		wgFull.Add(1)
+		go connection.getSnapshotProperties(ctx, &wgFull, fullSnapshotCh, fullSnapshotPropertyCh)
+	}
+	for range 1000 {
+		wgDelta.Add(1)
+		go connection.getSnapshotProperties(ctx, &wgDelta, deltaSnapshotCh, deltaSnapshotPropertyCh)
+	}
+
+	go func() {
+		for fullSnapshotProperty := range fullSnapshotPropertyCh {
+			totalFullSize += fullSnapshotProperty.size
+			maxFullSize = max(maxFullSize, fullSnapshotProperty.size)
+			numberFull++
+		}
+	}()
+
+	go func() {
+		for deltaSnapshotProperty := range deltaSnapshotPropertyCh {
+			totalDeltaSize += deltaSnapshotProperty.size
+			maxDeltaSize = max(maxDeltaSize, deltaSnapshotProperty.size)
+			numberDelta++
+		}
+	}()
+
+	var err error
+	if err = <-errCh; err != nil {
+		fmt.Println("Could not list the blob names:", err)
+		return
+	}
+	close(fullSnapshotCh)
+	close(deltaSnapshotCh)
+
+	wgFull.Wait()
+	wgDelta.Wait()
+	close(fullSnapshotPropertyCh)
+	close(deltaSnapshotPropertyCh)
+
+	return
+}
+
 func main() {
 	fmt.Println("Container statistics!")
 	fmt.Println()
@@ -58,54 +113,20 @@ func main() {
 		return
 	}
 
-	fullSnapshots, deltaSnapshots, err := connection.getSnapshots()
-	if err != nil {
-		fmt.Println("Could not list the blob names:", err)
-		return
-	}
-
-	var wg sync.WaitGroup
-
-	deltaProperties := make([]snapshotProperties, len(deltaSnapshots))
-	var totalDeltaSize, maxDeltaSize int64
-
-	for i, delta := range deltaSnapshots {
-		wg.Add(1)
-		go connection.getSnapshotProperties(&wg, delta, deltaProperties, i)
-	}
-	// delta calls done
-	wg.Wait()
-
-	for _, delta := range deltaProperties {
-		totalDeltaSize += delta.size
-		maxDeltaSize = max(maxDeltaSize, delta.size)
-	}
-
-	fullProperties := make([]snapshotProperties, len(fullSnapshots))
-	var totalFullSize, maxFullSize int64
-
-	for i, full := range fullSnapshots {
-		wg.Add(1)
-		go connection.getSnapshotProperties(&wg, full, fullProperties, i)
-	}
-	// full calls done
-	wg.Wait()
-
-	for _, full := range fullProperties {
-		totalFullSize += full.size
-		maxFullSize = max(maxFullSize, full.size)
-	}
+	ctx := context.Background()
+	numberFull, numberDelta, totalFullSize, totalDeltaSize, maxFullSize, maxDeltaSize := generateStatistics(ctx, connection)
 
 	fmt.Println("Running for account:", accountName)
 	fmt.Println("Running for container:", containerName)
 	fmt.Println("Running for seed:", seedName)
 
-	fmt.Println("Number of full snapshots are:", humanize.Comma(int64(len(fullSnapshots))))
-	fmt.Println("Number of delta snapshots are:", humanize.Comma(int64(len(deltaSnapshots))))
-	fmt.Println("Total size of deltas is:", humanize.Bytes(uint64(totalDeltaSize)))
+	fmt.Println("Number of full snapshots are:", humanize.Comma(int64(numberFull)))
+	fmt.Println("Number of delta snapshots are:", humanize.Comma(int64(numberDelta)))
+	fmt.Println("Total size is:", humanize.Bytes(uint64(totalFullSize+totalDeltaSize)))
 	fmt.Println("Total size of fulls is:", humanize.Bytes(uint64(totalFullSize)))
-	fmt.Println("Max size of deltas is:", humanize.Bytes(uint64(maxDeltaSize)))
+	fmt.Println("Total size of deltas is:", humanize.Bytes(uint64(totalDeltaSize)))
 	fmt.Println("Max size of fulls is:", humanize.Bytes(uint64(maxFullSize)))
+	fmt.Println("Max size of deltas is:", humanize.Bytes(uint64(maxDeltaSize)))
 	fmt.Println()
 
 	fmt.Println("Ran in:", time.Since(start).Seconds())
