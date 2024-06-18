@@ -5,20 +5,29 @@ import (
 	"os"
 	"sync"
 	"time"
+
+	"github.com/dustin/go-humanize"
+)
+
+const (
+	azureAccountName   = "AZURE_ACCOUNT_NAME"
+	azureAccountKey    = "AZURE_ACCOUNT_KEY"
+	azureContainerName = "AZURE_CONTAINER_NAME"
+	azureSeedName      = "AZURE_SEED_NAME"
 )
 
 func containerInfo() (string, string, string, error) {
-	accountName, ok := os.LookupEnv("AZURE_ACCOUNT_NAME")
+	accountName, ok := os.LookupEnv(azureAccountName)
 	if !ok {
 		return "", "", "", fmt.Errorf("no account name was provided")
 	}
 
-	accountKey, ok := os.LookupEnv("AZURE_ACCOUNT_KEY")
+	accountKey, ok := os.LookupEnv(azureAccountKey)
 	if !ok {
 		return "", "", "", fmt.Errorf("no account key was provided")
 	}
 
-	containerName, ok := os.LookupEnv("AZURE_CONTAINER_NAME")
+	containerName, ok := os.LookupEnv(azureContainerName)
 	if !ok {
 		return "", "", "", fmt.Errorf("no container name was provided")
 	}
@@ -36,6 +45,11 @@ func main() {
 	if err != nil {
 		fmt.Println("Starting the program failed because:", err)
 		return
+	}
+
+	seedName, ok := os.LookupEnv(azureSeedName)
+	if !ok {
+		fmt.Println("Seed name not provided")
 	}
 
 	connection, err := createContainerConnection(accountName, accountKey, containerName)
@@ -82,12 +96,16 @@ func main() {
 		maxFullSize = max(maxFullSize, full.size)
 	}
 
-	fmt.Println("Number of full snapshots are:", len(fullSnapshots))
-	fmt.Println("Number of delta snapshots are:", len(deltaSnapshots))
-	fmt.Println("Total size of deltas is:", totalDeltaSize)
-	fmt.Println("Total size of fulls is:", totalFullSize)
-	fmt.Println("Max size of deltas is:", maxDeltaSize)
-	fmt.Println("Max size of fulls is:", maxFullSize)
+	fmt.Println("Running for account:", accountName)
+	fmt.Println("Running for container:", containerName)
+	fmt.Println("Running for seed:", seedName)
+
+	fmt.Println("Number of full snapshots are:", humanize.Comma(int64(len(fullSnapshots))))
+	fmt.Println("Number of delta snapshots are:", humanize.Comma(int64(len(deltaSnapshots))))
+	fmt.Println("Total size of deltas is:", humanize.Bytes(uint64(totalDeltaSize)))
+	fmt.Println("Total size of fulls is:", humanize.Bytes(uint64(totalFullSize)))
+	fmt.Println("Max size of deltas is:", humanize.Bytes(uint64(maxDeltaSize)))
+	fmt.Println("Max size of fulls is:", humanize.Bytes(uint64(maxFullSize)))
 	fmt.Println()
 
 	fmt.Println("Ran in:", time.Since(start).Seconds())
