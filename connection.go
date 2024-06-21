@@ -15,11 +15,6 @@ type containerConnection struct {
 	containerURL *azblob.ContainerURL
 }
 
-type snapshotProperties struct {
-	name string
-	size int64
-}
-
 // returns the full snapshots and delta snapshots
 func (connection containerConnection) getSnapshots(ctx context.Context, fullSnapshotCh, deltaSnapshotCh chan string, errorCh chan error) {
 	opts := azblob.ListBlobsSegmentOptions{}
@@ -34,6 +29,7 @@ func (connection containerConnection) getSnapshots(ctx context.Context, fullSnap
 
 		// Process the blobs returned in this result segment
 		for _, blob := range listBlob.Segment.BlobItems {
+			// send to the channel consumed by getSnapshotMetadata()
 			if strings.Contains(blob.Name, "v2/Full") {
 				fullSnapshotCh <- blob.Name
 			} else if strings.Contains(blob.Name, "v2/Incr") {
@@ -44,7 +40,7 @@ func (connection containerConnection) getSnapshots(ctx context.Context, fullSnap
 	errorCh <- nil
 }
 
-func (connection containerConnection) getSnapshotProperties(ctx context.Context, wg *sync.WaitGroup, blobNameCh chan string, propertyCh chan snapshotProperties) {
+func (connection containerConnection) getSnapshotMetadata(ctx context.Context, wg *sync.WaitGroup, blobNameCh chan string, metadataCh chan snapshotMetadata) {
 	defer wg.Done()
 	for blobName := range blobNameCh {
 		blobURL := connection.containerURL.NewBlobURL(blobName)
@@ -53,7 +49,7 @@ func (connection containerConnection) getSnapshotProperties(ctx context.Context,
 		if err != nil {
 			continue
 		}
-		propertyCh <- snapshotProperties{
+		metadataCh <- snapshotMetadata{
 			blobName,
 			resp.ContentLength(),
 		}
